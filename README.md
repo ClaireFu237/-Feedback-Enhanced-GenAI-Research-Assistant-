@@ -67,33 +67,26 @@ This is a proposed architecture and documentation scaffold. Application code, de
 │   └── README.md
 ```
 
-## Proposed System Architecture
+## Module Boundaries
 
-```mermaid
-flowchart TD
-    U[User] --> UI[Streamlit frontend: local demo]
-    UI --> API[Amazon API Gateway]
-    API --> L[Lambda handlers / routes]
-    L --> ING[Ingestion service]
-    L --> RET[Retrieval and reranking service]
-    L --> GEN[Grounded answer / summary service]
-    L --> FB[Feedback service]
-    ING --> S3[Amazon S3: source documents and artifacts]
-    ING --> EMB[Embedding service]
-    RET --> EMB
-    EMB --> BR[Amazon Bedrock]
-    GEN --> BR
-    ING --> DB[Amazon DynamoDB: metadata, vectors, query logs, feedback]
-    RET --> DB
-    RET --> GEN
-    FB --> DB
-    DB --> RET
-    L --> CW[Amazon CloudWatch: logs and metrics]
-    EV[Evaluation: baseline vs enhanced] --> RET
-    EV --> GEN
-```
+| Folder | Responsibility |
+| --- | --- |
+| [`config/`](config/README.md) | Centralize environment-specific settings for AWS region, S3 buckets, DynamoDB tables, Bedrock model IDs, chunk size, overlap, retrieval top-k, and feedback weight. |
+| [`routes/`](routes/README.md) | Define the API boundary exposed through API Gateway and handled by AWS Lambda. |
+| [`schemas/`](schemas/README.md) | Define shared request, response, and persisted-record structures. |
+| [`services/`](services/README.md) | Coordinate the ingestion, retrieval, generation, and feedback workflows. |
+| [`storage/`](storage/README.md) | Isolate AWS and local persistence from application logic. |
+| [`utils/`](utils/README.md) | Hold small reusable helpers used across multiple modules. |
+| [`frontend/`](frontend/README.md) | Provide document upload, ingestion status, search, source-grounded Q&A, summarization, and feedback controls. |
+| [`prompts/`](prompts/README.md) | Store versioned templates for grounded question answering and source-based summarization. |
+| [`infrastructure/`](infrastructure/README.md) | Hold infrastructure-as-code definitions and deployment configuration for the proposed serverless architecture. |
+| [`data/`](data/README.md) | Organize the small research corpus and local pipeline outputs used by this project. |
+| [`evaluation/`](evaluation/README.md) | Compare semantic-only RAG against feedback-enhanced RAG on retrieval and answer quality. |
+| [`scripts/`](scripts/README.md) | Hold repeatable command-line workflows for local setup, ingestion, indexing, evaluation, and deployment. |
+| [`tests/`](tests/README.md) | Verify the behavior of the ingestion, RAG, feedback, and persistence boundaries as implementation is added. |
+| [`docs/`](docs/README.md) | Maintain architecture decisions, API contracts, setup instructions, operational notes, and final deliverables. |
 
-The diagram shows logical service responsibilities; it does not require a separate Lambda for every service. Backend packaging and handler boundaries will be selected during implementation. S3 upload events may invoke the ingestion handler, while API requests initiate uploads and report processing status. The frontend is initially a local Streamlit demo; hosted frontend infrastructure is not required for the first version.
+Routes validate and dispatch requests. Services implement workflows. Storage adapters handle persistence. Schemas define shared contracts. Configuration supplies settings, and utilities contain small cross-cutting helpers. The frontend communicates with the backend API.
 
 ## Main Workflows
 
