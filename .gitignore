@@ -1,0 +1,17 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.aws/
+
+# Keep data documentation; exclude local data artifacts.
+data/raw/*
+!data/raw/README.md
+data/processed/*
+!data/processed/README.md
+data/embeddings/*
+!data/embeddings/README.md
