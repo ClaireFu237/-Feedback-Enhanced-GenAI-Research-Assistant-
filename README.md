@@ -103,27 +103,6 @@ The diagram shows logical service responsibilities; it does not require a separa
 4. **Feedback:** record helpful/unhelpful feedback against an answer or chunk, retain query and retrieval context, and update ranking aggregates. Define answer-to-chunk attribution before applying answer feedback to chunk scores.
 5. **Evaluation:** compare semantic-only and feedback-enhanced retrieval using fixed questions, held-out relevance judgments, answer reviews, and citation checks.
 
-## Module Boundaries
-
-| Folder | Responsibility |
-| --- | --- |
-| [`config/`](config/README.md) | Centralize environment-specific settings for AWS region, S3 buckets, DynamoDB tables, Bedrock model IDs, chunk size, overlap, retrieval top-k, and feedback weight. |
-| [`routes/`](routes/README.md) | Define the API boundary exposed through API Gateway and handled by AWS Lambda. |
-| [`schemas/`](schemas/README.md) | Define shared request, response, and persisted-record structures. |
-| [`services/`](services/README.md) | Coordinate the ingestion, retrieval, generation, and feedback workflows. |
-| [`storage/`](storage/README.md) | Isolate AWS and local persistence from application logic. |
-| [`utils/`](utils/README.md) | Hold small reusable helpers used across multiple modules. |
-| [`frontend/`](frontend/README.md) | Provide document upload, ingestion status, search, source-grounded Q&A, summarization, and feedback controls. |
-| [`prompts/`](prompts/README.md) | Store versioned templates for grounded question answering and source-based summarization. |
-| [`infrastructure/`](infrastructure/README.md) | Hold infrastructure-as-code definitions and deployment configuration for the proposed serverless architecture. |
-| [`data/`](data/README.md) | Organize the small research corpus and local pipeline outputs used by this project. |
-| [`evaluation/`](evaluation/README.md) | Compare semantic-only RAG against feedback-enhanced RAG on retrieval and answer quality. |
-| [`scripts/`](scripts/README.md) | Hold repeatable command-line workflows for local setup, ingestion, indexing, evaluation, and deployment. |
-| [`tests/`](tests/README.md) | Verify the behavior of the ingestion, RAG, feedback, and persistence boundaries as implementation is added. |
-| [`docs/`](docs/README.md) | Maintain architecture decisions, API contracts, setup instructions, operational notes, and final deliverables. |
-
-Routes validate and dispatch requests. Services implement workflows. Storage adapters handle persistence. Schemas define shared contracts. Configuration supplies settings, and utilities contain small cross-cutting helpers. The frontend communicates with the backend API.
-
 ## Initial Design Decisions
 
 - Use Python with the proposal's S3, Bedrock, Lambda, API Gateway, DynamoDB, and CloudWatch stack.
