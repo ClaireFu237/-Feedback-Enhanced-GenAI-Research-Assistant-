@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "seed": 42,
+  "device": "cpu",
+  "torch_threads": 4,
+  "batch_size": 16,
+  "cache_root": "data_local/embeddings/mentor_demo",
+  "datasets": {
+    "hotpotqa": "demo_data/hotpotqa"
+  },
+  "text_recipe": "title-double-newline-body-v1",
+  "deduplication": "exact-title-and-text-v1",
+  "bm25": {
+    "k1": 1.5,
+    "b": 0.75,
+    "epsilon": 0.25,
+    "tokenizer": "unicode-word-casefold-v1"
+  },
+  "dense": {
+    "model_id": "sentence-transformers/all-MiniLM-L6-v2",
+    "revision": "c9745ed1d9f207416be6d2e6f8de32d1f16199bf",
+    "max_length": 256,
+    "normalize_embeddings": true,
+    "query_prefix": "",
+    "document_prefix": ""
+  },
+  "hybrid": {
+    "bm25_candidate_k": 50,
+    "dense_candidate_k": 50,
+    "rrf_constant": 60
+  },
+  "reranker": {
+    "model_id": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "revision": "c5ee24cb16019beea0893ab7796b1df96625c6b8",
+    "max_length": 512,
+    "candidate_k": 20,
+    "batch_size": 8
+  },
+  "model_cache_root": ".model_cache/huggingface/hub"
+}

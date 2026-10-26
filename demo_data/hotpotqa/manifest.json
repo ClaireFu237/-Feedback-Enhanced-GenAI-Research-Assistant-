@@ -1,0 +1,33 @@
+{
+  "dataset": "hotpotqa",
+  "dataset_version": "hotpotqa-0cc5bb554f9ab5e2",
+  "prepared_index_version": "prepared-corpus-adapter-v1-0b09576ea4fea392",
+  "document_count": 997,
+  "prepared_chunk_count": 997,
+  "setting": "shared pooled-context subset of 100 HotpotQA validation questions; not official fullwiki",
+  "source_url": "https://hotpotqa.github.io/",
+  "license": "CC-BY-SA-4.0",
+  "source_sampling_seed": 42,
+  "retrieval_unit": "one preserved context paragraph per document",
+  "deduplication": "Original preparation merged repeated title/sentence contexts; runtime additionally merges exact title/body duplicates and preserves aliases. Same body with different titles remains distinct.",
+  "scope": "Complete existing 997-paragraph corpus, including distractors; no answer, question, qrels, or supporting-fact labels included.",
+  "local_locator_base": "project root; source text is the text field in chunks.jsonl",
+  "files": {
+    "documents.jsonl": {
+      "sha256": "7410eef0183d19aa8d4c84a3abee327549965421c7e66575cd315c944ee34946",
+      "bytes": 940746
+    },
+    "chunks.jsonl": {
+      "sha256": "87622c96533f0a752a70eebf91f724a952d068da633a8d71d3d304fed24dcca1",
+      "bytes": 957323
+    },
+    "id_map.jsonl": {
+      "sha256": "c0f616cefda1d158cc72a2df54720c79d280fd4af5bd5a193c34fb9153478fae",
+      "bytes": 376866
+    },
+    "attribution.jsonl": {
+      "sha256": "06fdfa33840e298458cecd245d455781243bbc86741154929649a9f5198b6279",
+      "bytes": 266165
+    }
+  }
+}
