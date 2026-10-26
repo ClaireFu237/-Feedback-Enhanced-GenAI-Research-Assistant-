@@ -11,7 +11,6 @@ This update adds a standalone local Python retrieval/reranking module, a bundled
 | `hybrid` | BM25 and dense candidates combined with Reciprocal Rank Fusion |
 | `hybrid_reranker` | Hybrid candidates reordered by a pretrained cross-encoder |
 
-The module runs without FastAPI, AWS credentials, model training, or answer generation.
 
 ## Included data
 
