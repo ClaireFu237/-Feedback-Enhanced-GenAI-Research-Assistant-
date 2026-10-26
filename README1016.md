@@ -88,6 +88,6 @@ Dense inputs are truncated at 256 tokens and cross-encoder pairs at 512 tokens. 
 
 ## Submission files
 
-[MENTOR_FILES.txt](MENTOR_FILES.txt) lists the exact 21 files for this update: runtime modules, configuration, requirements, model setup, documentation, and the complete demonstration corpus with attribution. Reports, evaluation/test sources, model weights, generated caches and sample outputs are not required for the sample run. Existing architecture placeholder READMEs may remain from earlier commits.
+[FILES1016.txt](FILES1016.txt) lists the exact 21 files for this update: runtime modules, configuration, requirements, model setup, documentation, and the complete demonstration corpus with attribution. Reports, evaluation/test sources, model weights, generated caches and sample outputs are not required for the sample run. Existing architecture placeholder READMEs may remain from earlier commits.
 
 Verification used a separate copy containing only these submission files, a fresh virtual environment with no inherited base packages, fresh model downloads, and a newly built vector cache. All four methods, document filtering and cache reuse passed. This verifies runnable packaging; it does not establish retrieval accuracy for new questions.
