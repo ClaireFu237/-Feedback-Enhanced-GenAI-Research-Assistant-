@@ -1,8 +1,7 @@
 .gitignore
 README1016.md
 FILES1016.txt
-requirements-bm25.txt
-requirements-retrieval.txt
+requirements.txt
 config/retrieval.json
 config/demo_retrieval.json
 services/retrieval/README.md
