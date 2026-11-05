@@ -1,113 +1,111 @@
-# Feedback-Enhanced GenAI Research Assistant on AWS
+# PDF → chunks
 
-This project scaffold follows the capstone proposal, **Feedback-Enhanced GenAI Research Assistant Using Retrieval-Augmented Generation on AWS**. It organizes a low-cost application for uploading research documents, semantic search, grounded question answering, summarization, citations, and feedback-driven retrieval improvement.
+只完成本地 PDF 文本抽取、清洗、切块和来源记录。不调用 AWS、LLM 或 embedding API。
+无需依赖 `10.19` 中的代码。需要 Python 3.10 或以上版本。
 
-The directory layout adopts the reference screenshot's `config`, `routes`, `schemas`, `services`, `storage`, and `utils` layers, with additional folders for the frontend, AWS infrastructure, prompts, data, evaluation, scripts, tests, and documentation. Every directory contains an English README describing its purpose.
+## 安装与运行
 
-This is a proposed architecture and documentation scaffold. Application code, dependency manifests, deployment templates, and cloud resources have not been created. Names such as `main.py` or individual service files are implementation choices for a later step.
+```bash
+cd "/Users/fuclaire/Desktop/jhu 26fall/capstone/code/11.4"
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 
-## Directory Structure
-
-```text
-10.19/
-├── README.md
-├── config/
-│   └── README.md
-├── routes/
-│   └── README.md
-├── schemas/
-│   └── README.md
-├── services/
-│   ├── README.md
-│   ├── ingestion/
-│   │   └── README.md
-│   ├── embeddings/
-│   │   └── README.md
-│   ├── retrieval/
-│   │   └── README.md
-│   ├── generation/
-│   │   └── README.md
-│   └── feedback/
-│       └── README.md
-├── storage/
-│   ├── README.md
-│   ├── s3/
-│   │   └── README.md
-│   ├── dynamodb/
-│   │   └── README.md
-│   └── local/
-│       └── README.md
-├── utils/
-│   └── README.md
-├── frontend/
-│   └── README.md
-├── prompts/
-│   └── README.md
-├── infrastructure/
-│   └── README.md
-├── data/
-│   ├── README.md
-│   ├── raw/
-│   │   └── README.md
-│   ├── processed/
-│   │   └── README.md
-│   └── embeddings/
-│       └── README.md
-├── evaluation/
-│   ├── README.md
-│   ├── datasets/
-│   │   └── README.md
-│   └── results/
-│       └── README.md
-├── scripts/
-│   └── README.md
-├── tests/
-│   └── README.md
-├── docs/
-│   └── README.md
+# 处理 ../data/openalex/pdf 中的全部 PDF，自动读取对应的 manifest。
+python prepare_pdf_chunks.py
 ```
 
-## Module Boundaries
+默认使用本地缓存中的 `all-MiniLM-L6-v2` tokenizer，固定模型 revision 为
+`c9745ed1d9f207416be6d2e6f8de32d1f16199bf`。
+如果提示 tokenizer 不存在，首次运行添加 `--download-tokenizer`，只下载 tokenizer，不下载模型权重：
 
-| Folder | Responsibility |
+```bash
+python prepare_pdf_chunks.py --download-tokenizer
+```
+
+也可以用 `--tokenizer-file /path/to/tokenizer.json` 指定已有 tokenizer 文件，完全离线运行。
+下载行为使用 Hugging Face 的默认缓存位置；后续处理无需网络。
+
+程序默认路径相对于本项目的位置解析，不依赖当前终端目录；手动传入的相对路径则相对于终端目录。
+
+## 常见用法
+
+```bash
+# 少量试跑，独立保存输出。
+python prepare_pdf_chunks.py --limit 2 --output data_local/smoke
+
+# 重跑并替换这一输出目录内的七个生成文件。
+python prepare_pdf_chunks.py --overwrite
+
+# 单篇 PDF；默认 OpenAlex 目录下的文件仍会自动匹配元数据。
+python prepare_pdf_chunks.py \
+  --pdf ../data/openalex/pdf/W4411630045.pdf \
+  --output data_local/single
+
+# 自己的 PDF 文件夹，不需要 OpenAlex manifest，非递归读取 .pdf 文件。
+python prepare_pdf_chunks.py --pdf-dir /path/to/pdfs --output data_local/custom
+
+# 显式指定元数据文件，格式沿用现有 OpenAlex manifest 的 JSON 数组。
+python prepare_pdf_chunks.py --pdf-dir /path/to/pdfs \
+  --manifest /path/to/manifest.json --output data_local/custom
+
+# 把检测出的 References / Bibliography 也加入 chunks。
+python prepare_pdf_chunks.py --include-references --output data_local/with_references
+```
+
+非空输出目录必须显式添加 `--overwrite`；该参数只替换约定的生成文件，不清空其他内容。
+所有文档处理和暂存完成后才发布输出，最后写入 manifest；它不是跨多个文件的数据库事务。
+输入 PDF 和输入 manifest 不会被修改。
+
+## 切块规则
+
+- 按页保存文本块、原始文本、行信息和坐标，使用几何规则重建常见双栏论文的阅读顺序。
+- 清洗重复页眉页脚、页面边缘的纯页码和 arXiv 侧边标记，合并段落内换行、修复常见断词和连字。
+- 启发式识别章节，默认排除参考文献；检测到附录或 supplementary material 后恢复索引。
+- chunk 尽量在段落或句子边界结束，超长段落按 tokenizer 的原始字符 offsets 拆分。
+- 默认正文上限 **200 tokens**，重叠上限 **30 tokens**；实际重叠可因句子和章节边界而减少或为零。
+- 同时验证 `title + "\n\n" + chunk.text` 加 special tokens 后不超过 **256 tokens**。
+  三个参数分别为 `--chunk-size`、`--overlap`、`--max-input-tokens`。
+- chunk 始终是保存的 normalized text 的精确切片；章节之间不做 overlap。
+- 文本来源、PDF hash、标题、实现代码、解析器/tokenizer 版本和配置共同确定索引版本。
+  相同输入与环境重跑得到相同 chunk ID 和文本；运行时间字段会变化。
+
+切换 tokenizer 时，应同时设置对应的 `--max-input-tokens`，不要把 MiniLM 的 256 当作通用模型限制。
+`token_count` 是正文 token 数，不包含标题和 special tokens；完整输入的数量见 `id_map.jsonl`。
+
+## 输出
+
+默认输出目录：`data_local/processed/openalex/`。
+
+| 文件 | 内容 |
 | --- | --- |
-| [`config/`](config/README.md) | Centralize environment-specific settings for AWS region, S3 buckets, DynamoDB tables, Bedrock model IDs, chunk size, overlap, retrieval top-k, and feedback weight. |
-| [`routes/`](routes/README.md) | Define the API boundary exposed through API Gateway and handled by AWS Lambda. |
-| [`schemas/`](schemas/README.md) | Define shared request, response, and persisted-record structures. |
-| [`services/`](services/README.md) | Coordinate the ingestion, retrieval, generation, and feedback workflows. |
-| [`storage/`](storage/README.md) | Isolate AWS and local persistence from application logic. |
-| [`utils/`](utils/README.md) | Hold small reusable helpers used across multiple modules. |
-| [`frontend/`](frontend/README.md) | Provide document upload, ingestion status, search, source-grounded Q&A, summarization, and feedback controls. |
-| [`prompts/`](prompts/README.md) | Store versioned templates for grounded question answering and source-based summarization. |
-| [`infrastructure/`](infrastructure/README.md) | Hold infrastructure-as-code definitions and deployment configuration for the proposed serverless architecture. |
-| [`data/`](data/README.md) | Organize the small research corpus and local pipeline outputs used by this project. |
-| [`evaluation/`](evaluation/README.md) | Compare semantic-only RAG against feedback-enhanced RAG on retrieval and answer quality. |
-| [`scripts/`](scripts/README.md) | Hold repeatable command-line workflows for local setup, ingestion, indexing, evaluation, and deployment. |
-| [`tests/`](tests/README.md) | Verify the behavior of the ingestion, RAG, feedback, and persistence boundaries as implementation is added. |
-| [`docs/`](docs/README.md) | Maintain architecture decisions, API contracts, setup instructions, operational notes, and final deliverables. |
+| `documents.jsonl` | 文档 ID、标题、PDF hash、切块配置、版本和 chunk 数量 |
+| `pages.jsonl` | 每页原始文本块、行、bbox；保留清洗前文本以便核查 |
+| `normalized_texts.jsonl` | 完整清洗文本、段落 offsets、页码、章节、是否参与切块和 OpenAlex 来源信息 |
+| `chunks.jsonl` | chunk ID、正文、token 数、hash、页码和字符范围 |
+| `id_map.jsonl` | chunk 对应的 OpenAlex/本地来源 ID、章节、block IDs 和完整输入 token 数 |
+| `quality_report.json` | 每篇处理结果、低文字量页面、清洗统计、警告和错误 |
+| `manifest.json` | 参数、版本、数量、完成状态及其余输出文件的 SHA-256 |
 
-Routes validate and dispatch requests. Services implement workflows. Storage adapters handle persistence. Schemas define shared contracts. Configuration supplies settings, and utilities contain small cross-cutting helpers. The frontend communicates with the backend API.
+`source_location.page_start/page_end` 是从 **1** 开始的 PDF 物理页码，不是论文印刷页码。
+`char_start/char_end` 是该文档 normalized text 的 Python 字符下标，左闭右开；
+`normalized_text[char_start:char_end] == chunk.text`。
+`block_id` 在一篇文档内标识原始 PDF 块；查找时同时使用 document ID 和 index version。
 
-## Main Workflows
+document/chunk 的核心字段沿用 `10.19` 的格式，`id_map.jsonl` 可供原有 corpus loader 使用。
+本项目完成到 `chunked` 阶段；为了符合原有文档 schema，`documents.jsonl` 的 `status`
+保留为 `processing`，`embedding_model_id` 为 `null`，不会把尚未生成 embedding 的文档标成 `ready`。
+本阶段是否完成请看 `manifest.json` 的 `status` 和质量报告中的 `chunked`。
 
-1. **Ingestion:** upload PDF/text to S3, extract text with source locations, split into chunks, generate Bedrock embeddings, and persist metadata and vectors.
-2. **Search and Q&A:** embed the question, compute cosine similarity over the small corpus, optionally rerank candidates with historical feedback, and send selected evidence to a Bedrock LLM. Return an answer with document/chunk citations.
-3. **Summarization:** select a document's source chunks and generate a source-grounded summary with references.
-4. **Feedback:** record helpful/unhelpful feedback against an answer or chunk, retain query and retrieval context, and update ranking aggregates. Define answer-to-chunk attribution before applying answer feedback to chunk scores.
-5. **Evaluation:** compare semantic-only and feedback-enhanced retrieval using fixed questions, held-out relevance judgments, answer reviews, and citation checks.
+## 异常与限制
 
-## Initial Design Decisions
+- 低文字量页记录警告，仍保存可抽取文本；扫描页不会自动 OCR。
+- 损坏、加密、无可用文字、hash 不符或切块失败的 PDF 记入质量报告；其余 PDF 继续处理。
+  失败文档不会留下半份 chunks。
+- 退出码：`0` 全部处理成功，`1` 有文档失败，`2` 参数、依赖或文件配置错误。
+  `0` 仍可能伴随低文字量警告，需要查看质量报告。
+- 多栏排序、章节识别和断词修复均为启发式；复杂表格、公式、图中文字不保证完整恢复。
+  References 识别也可能有误判，可用 `--include-references` 对照原始文本检查。
+- 原始数据中的 `W3040807780.pdf` 有多页文字稀少，应人工检查再决定是否用于后续问答。
 
-- Use Python with the proposal's S3, Bedrock, Lambda, API Gateway, DynamoDB, and CloudWatch stack.
-- Start with approximately 20–50 documents and cosine similarity computed in application code. DynamoDB stores vectors and metadata; it is not treated as a native vector index.
-- Cache embeddings and record model versions to avoid unnecessary Bedrock calls and incompatible vector comparisons.
-- Keep the baseline score as semantic similarity. The initial enhanced scoring candidate is `semantic_similarity + feedback_weight * historical_feedback_score`; normalization, aggregation, and the weight must be documented and evaluated.
-- Preserve stable document, chunk, query, and answer IDs and source locations so citations, feedback, and evaluations remain traceable.
-- Use lightweight ranking adaptation without model training. Advanced bandits, multi-agent workflows, external academic search, SageMaker, and OpenSearch are outside the initial implementation scope.
-- Keep credentials outside source control and record operational settings, usage, and errors through configuration and monitoring.
-
-## Implementation Sequence
-
-Follow the proposal's eight-week progression: finalize scope and corpus; implement parsing and chunking; add embeddings and persistence; build baseline RAG; add the frontend; collect feedback; implement reranking and comparative evaluation; complete testing, deployment documentation, report, slides, and demo.
-
-The existing dataset preparation work in the sibling `../data/` directory is preserved. This project's `data/` directory is a separate destination for its selected corpus and generated artifacts.
+自己运行检查的步骤见 [RUN_TESTS.md](RUN_TESTS.md)。
