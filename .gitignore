@@ -32,3 +32,8 @@ data/embeddings/*
 /.model_cache/
 /outputs/
 /sample_output*.json
+
+# PDF ingestion staging and local smoke-test artifacts.
+/data_local/processed/.pdf-chunks-*/
+/data_local/test_*/
+/data_local/web_runs/

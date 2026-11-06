@@ -56,9 +56,16 @@ def resolve_model(model, cache_root=None):
 
 class LocalRetriever:
     """Independent synchronous retriever; no API server, LLM, or cloud clients."""
-    def __init__(self, dataset='scifact', config_path=None, config=None, corpus=None):
+    def __init__(self, dataset=None, config_path=None, config=None, corpus=None):
         self.config = config if config is not None else load_config(config_path)
-        self.corpus = corpus or Corpus.load(dataset, PROJECT / self.config['datasets'][dataset])
+        if corpus is None:
+            datasets = self.config['datasets']
+            dataset = dataset or self.config.get('default_dataset') or next(iter(datasets), None)
+            if dataset not in datasets:
+                raise ValueError('Unknown dataset. Configured datasets: ' + ', '.join(datasets))
+            self.corpus = Corpus.load(dataset, PROJECT / datasets[dataset])
+        else:
+            self.corpus = corpus
         if self.config['text_recipe'] != 'title-double-newline-body-v1' or self.config['deduplication'] != 'exact-title-and-text-v1':
             raise ValueError('Unsupported text or deduplication recipe')
         self.timings = {}

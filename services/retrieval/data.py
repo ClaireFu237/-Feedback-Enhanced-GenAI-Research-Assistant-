@@ -49,6 +49,17 @@ class Corpus:
     @classmethod
     def load(cls, dataset, folder):
         folder = Path(folder)
+        if not (folder / 'manifest.json').is_file():
+            raise ValueError(f'Corpus is not prepared: {folder}. Run scripts/prepare_pdf_chunks.py for PDF corpora, or select a prepared dataset/config.')
+        manifest = json.loads((folder / 'manifest.json').read_text())
+        if manifest.get('stage') in ('pdf_to_chunks', 'text_to_chunks'):
+            if manifest.get('status') != 'complete':
+                raise ValueError('PDF ingestion is incomplete; inspect quality_report.json and rerun ingestion')
+            # A failed/overlapping publication must not silently mix old and new
+            # document/chunk identities. Legacy demo manifests keep their format.
+            for name in ('documents.jsonl', 'chunks.jsonl', 'id_map.jsonl'):
+                if hashlib.sha256((folder / name).read_bytes()).hexdigest() != manifest['files'][name]:
+                    raise ValueError(f'Ingestion artifact checksum mismatch: {name}; rerun ingestion')
         documents = read_jsonl(folder / 'documents.jsonl')
         chunks = read_jsonl(folder / 'chunks.jsonl')
         if not documents or not chunks:
@@ -88,7 +99,6 @@ class Corpus:
         for i, unit in enumerate(units):
             for alias in unit['aliases']:
                 alias_map.setdefault(alias['document_id'], set()).add(i)
-        manifest = json.loads((folder / 'manifest.json').read_text())
         payload = [{'chunk_id': r['chunk_id'], 'index_version': r['index_version'],
                     'search_text': r['search_text'], 'source_location': r['source_location'],
                     'aliases': [{'chunk_id': a['chunk_id'], 'document_id': a['document_id'], 'source': a['source']} for a in r['aliases']]}

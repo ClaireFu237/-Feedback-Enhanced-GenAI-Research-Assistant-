@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PDFS = ROOT.parent / "data/openalex/pdf"
 DEFAULT_MANIFEST = ROOT.parent / "data/openalex/manifest.json"
 VERSION = "pdf-to-chunks-v1"
@@ -91,7 +91,26 @@ def inputs(args):
     return files, metadata, metadata_path
 
 
-def process_document(path, metadata, budget, recipe, timestamp, output, extract_pdf, make_chunks):
+def build_recipe(budget, include_references=False):
+    """Version the same tokenizer and implementation for CLI and web callers."""
+    import pymupdf
+    import tokenizers
+    from .chunk import VERSION as CHUNK_VERSION
+    from .extract import VERSION as PARSER_VERSION
+
+    return {"pipeline_version": VERSION, "parser_version": PARSER_VERSION,
+            "implementation_sha256": digest("".join(p.read_text(encoding="utf-8") for p in
+                [Path(__file__), ROOT / "services/ingestion/extract.py", ROOT / "services/ingestion/chunk.py"])),
+            "pymupdf_version": pymupdf.VersionBind, "chunker_version": CHUNK_VERSION,
+            "tokenizers_version": tokenizers.__version__, "tokenizer_sha256": budget.fingerprint,
+            "chunk_size": budget.chunk_size, "overlap": budget.overlap,
+            "max_input_tokens": budget.max_input, "include_references": include_references,
+            "input_text_recipe": "title-double-newline-body"}
+
+
+def process_document(path, metadata, budget, recipe, timestamp, output, extract_pdf, make_chunks,
+                     extraction=None):
+    """Build canonical records, optionally reusing a saved extraction stage."""
     pdf_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     expected = metadata.get("pdf_sha256")
     if expected and pdf_hash != expected:
@@ -101,10 +120,11 @@ def process_document(path, metadata, budget, recipe, timestamp, output, extract_
         raise ValueError("Document title must contain 1–500 characters")
     title = title.strip()
     source_id = metadata.get("doc_id") or "sha256:" + pdf_hash
-    source = "openalex" if metadata.get("source") == "openalex" or metadata.get("openalex_id") else "local-pdf"
+    source = "openalex" if metadata.get("source") == "openalex" or metadata.get("openalex_id") else (
+        "local-pdf" if path.suffix.lower() == ".pdf" else "local-text")
     document_id = stable_id("doc", f"{source}:document:{source_id}")
     version = VERSION + "-" + digest(json_text({"pdf_hash": pdf_hash, "title": title, "recipe": recipe}))[:24]
-    pages, text, paragraphs, report = extract_pdf(path, recipe["include_references"])
+    pages, text, paragraphs, report = extraction if extraction is not None else extract_pdf(path, recipe["include_references"])
     raw_chunks = make_chunks(text, paragraphs, title, budget)
     chunks, mappings = [], []
     for index, item in enumerate(raw_chunks):
@@ -119,7 +139,7 @@ def process_document(path, metadata, budget, recipe, timestamp, output, extract_
                          "block_ids": item["block_ids"], "input_token_count": item["input_token_count"]})
     document = {
         "document_id": document_id, "title": title, "filename": path.name,
-        "content_type": "application/pdf", "size_bytes": path.stat().st_size,
+        "content_type": "application/pdf" if path.suffix.lower() == ".pdf" else "text/plain", "size_bytes": path.stat().st_size,
         # The shared 10.19 schema reserves 'ready' for a complete embedded index.
         "status": "processing", "source_object_key": str(path), "content_hash": pdf_hash,
         "processed_text_key": f"local-jsonl:{output / 'normalized_texts.jsonl'}#document_id={document_id}",
@@ -143,10 +163,8 @@ def process_document(path, metadata, budget, recipe, timestamp, output, extract_
 
 def run(args):
     # Keep --help usable even before installing dependencies.
-    import pymupdf
-    import tokenizers
-    from pdf_chunks.chunk import TokenBudget, VERSION as CHUNK_VERSION, make_chunks
-    from pdf_chunks.extract import VERSION as PARSER_VERSION, extract_pdf
+    from .chunk import TokenBudget, make_chunks
+    from .extract import extract_pdf
 
     files, metadata, input_manifest = inputs(args)
     output = args.output.resolve()
@@ -162,14 +180,7 @@ def run(args):
             raise ValueError(f"Refusing output symlink or directory: {target}")
     budget = TokenBudget(args.tokenizer_file, args.download_tokenizer, args.chunk_size,
                          args.overlap, args.max_input_tokens)
-    recipe = {"pipeline_version": VERSION, "parser_version": PARSER_VERSION,
-              "implementation_sha256": digest("".join(p.read_text(encoding="utf-8") for p in
-                  [Path(__file__), ROOT / "pdf_chunks/extract.py", ROOT / "pdf_chunks/chunk.py"])),
-              "pymupdf_version": pymupdf.VersionBind, "chunker_version": CHUNK_VERSION,
-              "tokenizers_version": tokenizers.__version__, "tokenizer_sha256": budget.fingerprint,
-              "chunk_size": args.chunk_size, "overlap": args.overlap,
-              "max_input_tokens": args.max_input_tokens, "include_references": args.include_references,
-              "input_text_recipe": "title-double-newline-body"}
+    recipe = build_recipe(budget, args.include_references)
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     reports, counts, seen_docs, seen_chunks = [], {"documents": 0, "pages": 0, "chunks": 0}, set(), set()
     output.parent.mkdir(parents=True, exist_ok=True)

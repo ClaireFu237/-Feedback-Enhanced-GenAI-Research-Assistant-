@@ -144,10 +144,11 @@ def make_chunks(text, paragraphs, title, budget):
             if text[previous_end:start].strip():
                 raise ValueError("Chunking omitted non-whitespace text")
             matching = [p for p in group if p["char_start"] < end and p["char_end"] > start]
-            result.append({"text": text[start:end], "source_location": {
-                "page_start": min(p["page_number"] for p in matching),
-                "page_end": max(p["page_number"] for p in matching),
-                "char_start": start, "char_end": end}, "section": group[0]["section"],
+            location = {"char_start": start, "char_end": end}
+            pages = [p["page_number"] for p in matching if p.get("page_number") is not None]
+            if pages:
+                location.update(page_start=min(pages), page_end=max(pages))
+            result.append({"text": text[start:end], "source_location": location, "section": group[0]["section"],
                 "block_ids": list(dict.fromkeys(p["block_id"] for p in matching)),
                 "token_count": budget.count(text[start:end]),
                 "input_token_count": budget.count(title + "\n\n" + text[start:end], special=True)})

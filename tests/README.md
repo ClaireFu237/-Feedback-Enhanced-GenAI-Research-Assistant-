@@ -1,7 +1,12 @@
-# Automated Tests
+# Functional tests
 
-Verify the behavior of the ingestion, RAG, feedback, and persistence boundaries as implementation is added.
+Install `requirements.txt`, then run:
 
-Use deterministic fixtures and mocked AWS clients for routine development. Cover citation provenance, similarity ordering, feedback aggregation, duplicate-event handling, and insufficient-evidence behavior. Keep paid cloud integration tests explicit and separate from routine checks.
+```bash
+python -m unittest discover -s tests -p 'test_web_api.py' -v
+```
 
-Status: architecture scaffold; implementation will be added here.
+Tests use temporary directories and small generated PDFs. They check stage
+boundaries, full pipeline/reuse, source positions, invalidation, text import,
+isolation, errors, concurrent requests and restart recovery. No model download
+or retrieval-quality evaluation is needed. See ../WEB_GUIDE.md for Swagger UI instructions.
