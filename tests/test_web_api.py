@@ -1,4 +1,4 @@
-"""Small, offline functional checks; no retrieval-quality evaluation."""
+"""Small, offline workflow checks."""
 import json
 import tempfile
 import threading

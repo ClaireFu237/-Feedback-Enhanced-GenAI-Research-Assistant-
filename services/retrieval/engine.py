@@ -63,10 +63,10 @@ class LocalRetriever:
             dataset = dataset or self.config.get('default_dataset') or next(iter(datasets), None)
             if dataset not in datasets:
                 raise ValueError('Unknown dataset. Configured datasets: ' + ', '.join(datasets))
-            self.corpus = Corpus.load(dataset, PROJECT / datasets[dataset])
+            self.corpus = Corpus.load(dataset, PROJECT / datasets[dataset], self.config['text_recipe'])
         else:
             self.corpus = corpus
-        if self.config['text_recipe'] != 'title-double-newline-body-v1' or self.config['deduplication'] != 'exact-title-and-text-v1':
+        if self.config['text_recipe'] not in ('title-double-newline-body-v1', 'title-section-body-v1') or self.config['deduplication'] != 'exact-title-and-text-v1':
             raise ValueError('Unsupported text or deduplication recipe')
         self.timings = {}
         self.bm25 = None
@@ -179,6 +179,7 @@ class LocalRetriever:
 
         mode preserves the existing feedback contract; only baseline is supported.
         method selects the algorithm independently of future feedback learning.
+        hybrid_reranker scores the entire branch union before taking top_k.
         """
         if not isinstance(query, str) or not query.strip() or len(query) > 4000:
             raise ValueError('query must contain 1-4000 characters with non-whitespace text')
@@ -190,6 +191,8 @@ class LocalRetriever:
         self.prepare(method)
         started = time.perf_counter()
         bm, dense = self._branches(query.strip(), eligible, method != 'dense', method != 'bm25')
+        retrieval_ms = (time.perf_counter() - started) * 1000
+        reranker_ms = 0.0
         stages = {}
         for idx, score in bm:
             stages.setdefault(idx, {})['bm25'] = score
@@ -210,20 +213,24 @@ class LocalRetriever:
             if method == 'hybrid':
                 ranked, score_type = fused[:top_k], 'rrf'
             else:
-                pool = fused[:self.config['reranker']['candidate_k']]
+                # RRF rank must not discard evidence before the cross-encoder sees it.
+                pool = fused
                 texts = [self.corpus.units[i]['search_text'] for i, _ in pool]
+                rerank_started = time.perf_counter()
                 scores = self.reranker.predict([(query.strip(), text) for text in texts],
                     batch_size=self.config['reranker']['batch_size'])
                 scores = np.asarray(scores).reshape(-1)
+                reranker_ms = (time.perf_counter() - rerank_started) * 1000
                 if len(scores) != len(pool) or not np.isfinite(scores).all():
                     raise ValueError('Invalid cross-encoder scores')
                 ranked = sorted([(item[0], float(score)) for item, score in zip(pool, scores)],
-                    key=lambda item: (-item[1], self.corpus.units[item[0]]['chunk_id']))[:top_k]
+                    key=lambda item: (-item[1], self.corpus.units[item[0]]['chunk_id']))
                 for idx, score in zip([i for i, _ in pool], scores):
                     stages[idx]['cross_encoder'] = float(score)
                 score_type = 'cross_encoder_logit'
         results = [{**self.corpus.display(idx, document_ids), 'rank': rank, 'score': float(score),
                     'score_type': score_type, 'stage_scores': stages[idx]} for rank, (idx, score) in enumerate(ranked, 1)]
+        results = results[:top_k]
         candidate_docs = [self.corpus.display(idx, document_ids)['document_id'] for idx, _ in pool]
         return {'retrieval_id': 'ret_' + str(uuid.uuid4()), 'created_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                 'query': query.strip(), 'method': method, 'mode': mode, 'top_k': top_k,
@@ -231,4 +238,5 @@ class LocalRetriever:
                 'results': results, 'candidate_document_ids': candidate_docs,
                 'candidate_k': len(pool),
                 'truncated_reranker_pairs': self.reranker.last_truncated_pair_count if method == 'hybrid_reranker' else 0,
+                'retrieval_ms': retrieval_ms, 'reranker_ms': reranker_ms,
                 'query_ms': (time.perf_counter() - started) * 1000}

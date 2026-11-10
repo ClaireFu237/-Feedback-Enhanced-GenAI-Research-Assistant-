@@ -161,5 +161,5 @@ python -m unittest discover -s tests -p 'test_web_api.py' -v
 ```
 
 测试使用临时目录和生成的小 PDF，检查阶段复用、失效规则、来源映射、隔离、
-错误处理和任务状态，不做复杂的检索质量 evaluation。
+错误处理和任务状态。
 复杂双栏、表格和公式仍需人工核查，扫描页不做 OCR。

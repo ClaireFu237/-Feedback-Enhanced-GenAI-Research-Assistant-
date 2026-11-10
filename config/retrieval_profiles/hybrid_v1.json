@@ -1,0 +1,21 @@
+{
+  "name": "hybrid_v1",
+  "dataset": "library",
+  "method": "hybrid",
+  "bm25_k": 50,
+  "dense_k": 50,
+  "rrf_k": 60,
+  "top_k": 10,
+  "text_recipe": "title-double-newline-body-v1",
+  "max_chunks_per_document": null,
+  "bm25": {"k1": 1.5, "b": 0.75, "epsilon": 0.25, "tokenizer": "unicode-word-casefold-v1"},
+  "dense": {
+    "model_id": "sentence-transformers/all-MiniLM-L6-v2",
+    "revision": "c9745ed1d9f207416be6d2e6f8de32d1f16199bf",
+    "max_length": 256,
+    "normalize_embeddings": true,
+    "query_prefix": "",
+    "document_prefix": ""
+  },
+  "deduplication": "exact-title-and-text-v1"
+}

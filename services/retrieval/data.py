@@ -1,8 +1,9 @@
-"""Read only searchable corpus records; evaluation labels are never loaded here."""
+"""Load searchable corpus records and source provenance."""
 from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,8 +29,8 @@ def load_config(path=None):
     hybrid = config['hybrid']
     if min(hybrid['bm25_candidate_k'], hybrid['dense_candidate_k']) < 20:
         raise ValueError('Each branch must supply at least the maximum public top_k (20)')
-    if config['reranker']['candidate_k'] < 20 or hybrid['rrf_constant'] <= 0:
-        raise ValueError('Invalid RRF constant or reranker candidate_k')
+    if config['reranker'].get('candidate_scope', 'full_union') != 'full_union' or hybrid['rrf_constant'] <= 0:
+        raise ValueError('Require positive RRF constant and full_union reranker candidate scope')
     if config['dense']['normalize_embeddings'] is not True:
         raise ValueError('This engine requires normalized cosine embeddings')
     return config
@@ -47,12 +48,13 @@ class Corpus:
     scope_ids: list
 
     @classmethod
-    def load(cls, dataset, folder):
-        folder = Path(folder)
+    def load(cls, dataset, folder, text_recipe='title-double-newline-body-v1'):
+        # Pin one immutable library snapshot across all file reads.
+        folder = Path(folder).resolve()
         if not (folder / 'manifest.json').is_file():
             raise ValueError(f'Corpus is not prepared: {folder}. Run scripts/prepare_pdf_chunks.py for PDF corpora, or select a prepared dataset/config.')
         manifest = json.loads((folder / 'manifest.json').read_text())
-        if manifest.get('stage') in ('pdf_to_chunks', 'text_to_chunks'):
+        if manifest.get('stage') in ('pdf_to_chunks', 'text_to_chunks', 'library'):
             if manifest.get('status') != 'complete':
                 raise ValueError('PDF ingestion is incomplete; inspect quality_report.json and rerun ingestion')
             # A failed/overlapping publication must not silently mix old and new
@@ -69,6 +71,8 @@ class Corpus:
             raise ValueError('Duplicate stable IDs in input corpus')
         mapping_rows = read_jsonl(folder / 'id_map.jsonl')
         provenance = {r['chunk_id']: r for r in mapping_rows}
+        if text_recipe not in ('title-double-newline-body-v1', 'title-section-body-v1'):
+            raise ValueError('Unsupported text recipe')
         if len(provenance) != len(mapping_rows) or set(provenance) != {r['chunk_id'] for r in chunks}:
             raise ValueError('Incomplete or duplicate source-ID mapping')
         groups = {}
@@ -87,6 +91,9 @@ class Corpus:
                 'dataset': dataset,
                 'source_document_id': provenance[chunk['chunk_id']]['source_document_id'],
                 'source_chunk_id': provenance[chunk['chunk_id']]['source_chunk_id']}}
+            section = str(provenance[chunk['chunk_id']].get('section') or '').strip()
+            # Known extractor artifacts are voltage labels, not section headings.
+            row['section'] = '' if section == 'Unsectioned' or re.fullmatch(r'[+-]?\d+(?:\.\d+)?\s*V', section) else section
             groups.setdefault(key, []).append(row)
         units, alias_map = [], {}
         for aliases in groups.values():
@@ -94,6 +101,8 @@ class Corpus:
             canonical = dict(aliases[0])
             canonical['aliases'] = aliases
             canonical['search_text'] = canonical['document_title'] + '\n\n' + canonical['text']
+            if text_recipe == 'title-section-body-v1' and canonical['section']:
+                canonical['search_text'] = canonical['document_title'] + '\n\n' + canonical['section'] + '\n\n' + canonical['text']
             units.append(canonical)
         units.sort(key=lambda r: r['chunk_id'])
         for i, unit in enumerate(units):
@@ -118,18 +127,6 @@ class Corpus:
         if unknown:
             raise ValueError('Unknown document IDs: ' + ', '.join(sorted(unknown)))
         return sorted(set().union(*(self.document_aliases[d] for d in document_ids)))
-
-    def canonical_document(self, document_id):
-        """Map a document label to its canonical document identity."""
-        matches = self.document_aliases.get(document_id)
-        if not matches:
-            raise ValueError('Evaluation label references an absent document')
-        # The current corpora have one chunk per document. Avoid silently applying
-        # this helper to future multi-chunk documents with cross-document aliases.
-        canonical = {self.units[i]['document_id'] for i in matches}
-        if len(canonical) != 1:
-            raise ValueError('Ambiguous document alias; explicit document mapping required')
-        return next(iter(canonical))
 
     def display(self, index, document_ids=None):
         """Return an in-scope original identity while retaining canonical aliases."""

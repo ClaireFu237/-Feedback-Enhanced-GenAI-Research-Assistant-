@@ -18,6 +18,7 @@ from services.ingestion.extract import extract_pdf
 from services.ingestion.pipeline import OUTPUTS, ROOT, build_recipe, digest, process_document
 from services.retrieval.data import Corpus, load_config, read_jsonl
 from services.retrieval.engine import LocalRetriever, resolve_model
+from storage.local.library import LibraryStorage, LocalLibraryStorage
 
 MAX_FILE = 20 * 1024 * 1024
 MAX_TEXT = 2_000_000
@@ -80,7 +81,7 @@ def validated_cleaned(data):
 
 
 class Workbench:
-    def __init__(self, root=None):
+    def __init__(self, root=None, library: LibraryStorage | None = None):
         self.root = Path(root or ROOT / "data_local/web_runs").resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "runs").mkdir(exist_ok=True)
@@ -90,6 +91,7 @@ class Workbench:
         self.pending = 0
         self.closed = False
         self.retrievers = OrderedDict()
+        self.library = library if library is not None else LocalLibraryStorage(self.root / "library")
         # A server restart cannot resume a Python thread or trust its old busy flag.
         for path in (self.root / "tasks").glob("*.json"):
             task = read(path)
@@ -225,7 +227,7 @@ class Workbench:
             task["history"].append({"step": step, "at": now()})
             write(self.root / "tasks" / f"{task_id}.json", task)
 
-    def submit(self, operation, fn, run_id=None):
+    def submit(self, operation, fn, run_id=None, input_data=None):
         with self.lock:
             if self.closed:
                 raise Problem("服务正在关闭。", 503)
@@ -237,6 +239,8 @@ class Workbench:
             task = {"task_id": task_id, "run_id": run_id, "operation": operation, "status": "queued",
                     "step": "queued", "created_at": now(), "updated_at": now(), "error": None,
                     "history": [], "result": None}
+            if input_data is not None:
+                task["input"] = copy.deepcopy(input_data)
             write(self.root / "tasks" / f"{task_id}.json", task)
             if run_id:
                 self.update(run_id, active_task=task_id, last_error=None)
@@ -330,6 +334,24 @@ class Workbench:
     def drop_retriever(self, key):
         self.retrievers.pop(key, None)
 
+    def publish(self, run_id, task_id):
+        state = self.state(run_id)
+        if not state["_corpus"]:
+            raise Problem("请先生成 chunks，再发布论文。")
+        self.progress(task_id, "publishing")
+        result = self.library.publish(self.folder(run_id) / state["_corpus"])
+        self.drop_retriever("dataset:library")
+        return result
+
+    def library_documents(self):
+        snapshot = self.library.snapshot()
+        if snapshot is None:
+            return {"total": 0, "items": []}
+        documents = read_jsonl(snapshot / "documents.jsonl")
+        return {"total": len(documents), "items": [
+            {key: row[key] for key in ("document_id", "title", "filename", "chunk_count", "index_version")}
+            for row in documents]}
+
     def search(self, run_id, options, task_id):
         method = options["method"]
         config = load_config()
@@ -352,13 +374,24 @@ class Workbench:
             dataset = options["dataset"]
             if dataset not in config["datasets"]:
                 raise Problem("未知语料库。", 422)
-            corpus = ROOT / config["datasets"][dataset]
+            if dataset == "library":
+                corpus = self.library.snapshot()
+                if corpus is None:
+                    raise Problem("资料库为空，请先上传、切块并发布论文。")
+            else:
+                corpus = ROOT / config["datasets"][dataset]
             cache_key = "dataset:" + dataset
+        # Detect publications by another process as well as this workbench.
+        if dataset == "library" and cache_key in self.retrievers:
+            if self.retrievers[cache_key]._library_snapshot != corpus:
+                self.drop_retriever(cache_key)
         self.progress(task_id, "indexing" if method == "bm25" else "embedding")
         if cache_key not in self.retrievers:
             config = copy.deepcopy(config)
             config["cache_root"] = str(self.root / "embeddings")
             self.retrievers[cache_key] = LocalRetriever(config=config, corpus=Corpus.load(dataset, corpus))
+            if dataset == "library":
+                self.retrievers[cache_key]._library_snapshot = corpus
             while len(self.retrievers) > 2:
                 self.retrievers.popitem(last=False)
         retriever = self.retrievers[cache_key]
@@ -367,6 +400,8 @@ class Workbench:
         self.progress(task_id, "searching")
         result = retriever.search(options["query"], options["top_k"], options.get("document_ids"), method)
         result["setup_timings"] = dict(retriever.timings)
+        result["dataset"] = dataset
+        result["document_ids"] = options.get("document_ids")
         if run_id:
             relative = "results/" + uuid.uuid4().hex + ".json"
             write(self.folder(run_id) / relative, result)
@@ -396,5 +431,6 @@ class Workbench:
                 except FileNotFoundError:
                     reason = "先准备本地模型权重"
             methods[method] = {"available": not reason, "reason": reason}
-        return {"methods": methods, "datasets": [{"id": name, "available": (ROOT / path / "manifest.json").is_file()}
+        return {"methods": methods, "datasets": [{"id": name, "available":
+                self.library.snapshot() is not None if name == "library" else (ROOT / path / "manifest.json").is_file()}
                 for name, path in config["datasets"].items()], "max_upload_mb": 20, "max_text_characters": MAX_TEXT}

@@ -1,0 +1,11 @@
+{
+  "version": "grounded_generation_v1",
+  "region": "us-east-1",
+  "model_id": "us.amazon.nova-lite-v1:0",
+  "max_output_tokens": 1400,
+  "temperature": 0.0,
+  "context_max_chars": 40000,
+  "connect_timeout_s": 10,
+  "read_timeout_s": 120,
+  "output_root": "outputs/generation"
+}

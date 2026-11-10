@@ -25,9 +25,6 @@ data/embeddings/*
 !/data_local/embeddings/**/README.md
 /data_local/.prepare-retrieval-*/
 
-# Atomic evaluation output staging.
-/evaluation/results/**/*.tmp
-
 # Mentor-demo downloads and generated outputs (bundled demo_data stays tracked).
 /.model_cache/
 /outputs/

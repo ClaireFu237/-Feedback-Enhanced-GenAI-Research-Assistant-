@@ -27,8 +27,7 @@ class SearchOptions(BaseModel):
     method: Literal["bm25", "dense", "hybrid", "hybrid_reranker"] = "bm25"
     top_k: int = Field(5, ge=1, le=20)
     document_ids: list[str] | None = None
-    dataset: str = "openalex"
-
+    dataset: str = "library"
     @field_validator("query")
     @classmethod
     def nonblank(cls, value):
@@ -42,6 +41,19 @@ class PipelineOptions(BaseModel):
     search: SearchOptions
 
 
+class AnswerOptions(BaseModel):
+    query: str = Field(min_length=1, max_length=4000)
+    retrieval_profile: Literal['hybrid_v1']
+    document_ids: list[str] | None = None
+
+    @field_validator('query')
+    @classmethod
+    def nonblank(cls, value):
+        if not value.strip():
+            raise ValueError('Question cannot be blank')
+        return value.strip()
+
+
 class TextInput(BaseModel):
     title: str = Field("Pasted text", min_length=1, max_length=500)
     text: str = Field(min_length=1, max_length=MAX_TEXT)
@@ -51,6 +63,7 @@ def create_app(data_root=None):
     @asynccontextmanager
     async def lifespan(app):
         app.state.workbench = Workbench(data_root)
+        app.state.generation_service = None
         yield
         app.state.workbench.close()
 
@@ -137,7 +150,8 @@ def create_app(data_root=None):
         store = wb(request)
         if not store.state(run_id)["_corpus"]:
             raise Problem("请先生成 chunks。")
-        return store.submit("search", lambda task: store.search(run_id, body.model_dump(), task), run_id)
+        return store.submit("search", lambda task: store.search(run_id, body.model_dump(), task), run_id,
+                            input_data=body.model_dump())
 
     @app.post("/api/runs/{run_id}/pipeline", status_code=202)
     def pipeline(run_id: str, body: PipelineOptions, request: Request):
@@ -148,8 +162,40 @@ def create_app(data_root=None):
 
     @app.post("/api/search", status_code=202)
     def search_dataset(body: SearchOptions, request: Request):
+        """默认检索 library。可用 document_ids 限定论文范围。"""
         store = wb(request)
-        return store.submit("search_dataset", lambda task: store.search(None, body.model_dump(), task))
+        return store.submit("search_dataset", lambda task: store.search(None, body.model_dump(), task),
+                            input_data=body.model_dump())
+
+    @app.post('/api/answers', status_code=202)
+    def generate_answer(body: AnswerOptions, request: Request):
+        """Queue a grounded answer using an explicitly named retrieval profile."""
+        store = wb(request)
+
+        def generate(task_id):
+            # Workbench has a serial worker: initialization occurs once per app process.
+            if app.state.generation_service is None:
+                from services.generation.service import create_service
+                app.state.generation_service = create_service(
+                    profile_path=ROOT / 'config/retrieval_profiles' / f'{body.retrieval_profile}.json',
+                    config_path=ROOT / 'config/generation.json', output_root=store.root / 'answers')
+            store.progress(task_id, 'retrieving_and_generating')
+            return app.state.generation_service.answer(body.query, body.document_ids)
+
+        return store.submit('answer', generate, input_data=body.model_dump())
+
+    @app.post("/api/runs/{run_id}/publish", status_code=202)
+    def publish(run_id: str, request: Request):
+        """将已切块论文发布到 library；已有 document_id 保留首次发布版本。"""
+        store = wb(request)
+        if not store.state(run_id)["_corpus"]:
+            raise Problem("请先生成 chunks，再发布论文。")
+        return store.submit("publish", lambda task: store.publish(run_id, task), run_id)
+
+    @app.get("/api/library/documents")
+    def library_documents(request: Request):
+        """列出已发布论文及其 document_id，供检索过滤和问题标注使用。"""
+        return wb(request).library_documents()
 
     @app.get("/api/tasks/{task_id}")
     def task(task_id: str, request: Request):
